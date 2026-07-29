@@ -1544,6 +1544,8 @@ struct TabBarView: View {
                 splitActionButton(button, tooltips: tooltips)
                 .accessibilityIdentifier(splitActionButtonAccessibilityIdentifier(button))
                 .safeHelp(splitActionButtonTooltip(button, tooltips: tooltips))
+                .disabled(!button.isEnabled)
+                .opacity(button.isEnabled ? 1 : 0.45)
             }
         }
         .padding(.leading, TabBarStyling.splitButtonsLeadingPadding)
@@ -1671,7 +1673,7 @@ struct TabBarView: View {
     }
 
     private func performSplitActionButton(_ button: BonsplitConfiguration.SplitActionButton) {
-        guard splitViewController.isInteractive else { return }
+        guard splitViewController.isInteractive, button.isEnabled else { return }
 
         switch button.action {
         case .newTerminal:

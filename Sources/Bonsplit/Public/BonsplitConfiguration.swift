@@ -295,6 +295,8 @@ extension BonsplitConfiguration {
         public var tooltip: String?
         public var action: Action
         public var activatesOnMouseDown: Bool
+        /// Whether the host currently permits this action.
+        public var isEnabled: Bool
 
         private enum CodingKeys: String, CodingKey {
             case id
@@ -302,6 +304,7 @@ extension BonsplitConfiguration {
             case tooltip
             case action
             case activatesOnMouseDown
+            case isEnabled
         }
 
         public var systemImage: String {
@@ -316,14 +319,16 @@ extension BonsplitConfiguration {
             systemImage: String,
             tooltip: String? = nil,
             action: Action,
-            activatesOnMouseDown: Bool = false
+            activatesOnMouseDown: Bool = false,
+            isEnabled: Bool = true
         ) {
             self.init(
                 id: id,
                 icon: .systemImage(systemImage),
                 tooltip: tooltip,
                 action: action,
-                activatesOnMouseDown: activatesOnMouseDown
+                activatesOnMouseDown: activatesOnMouseDown,
+                isEnabled: isEnabled
             )
         }
 
@@ -332,13 +337,15 @@ extension BonsplitConfiguration {
             icon: Icon,
             tooltip: String? = nil,
             action: Action,
-            activatesOnMouseDown: Bool = false
+            activatesOnMouseDown: Bool = false,
+            isEnabled: Bool = true
         ) {
             self.id = id
             self.icon = icon
             self.tooltip = tooltip
             self.action = action
             self.activatesOnMouseDown = activatesOnMouseDown
+            self.isEnabled = isEnabled
         }
 
         public init(from decoder: Decoder) throws {
@@ -348,6 +355,7 @@ extension BonsplitConfiguration {
             tooltip = try container.decodeIfPresent(String.self, forKey: .tooltip)
             action = try container.decode(Action.self, forKey: .action)
             activatesOnMouseDown = try container.decodeIfPresent(Bool.self, forKey: .activatesOnMouseDown) ?? false
+            isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         }
 
         public func encode(to encoder: Encoder) throws {
@@ -358,6 +366,9 @@ extension BonsplitConfiguration {
             try container.encode(action, forKey: .action)
             if activatesOnMouseDown {
                 try container.encode(activatesOnMouseDown, forKey: .activatesOnMouseDown)
+            }
+            if !isEnabled {
+                try container.encode(isEnabled, forKey: .isEnabled)
             }
         }
 
