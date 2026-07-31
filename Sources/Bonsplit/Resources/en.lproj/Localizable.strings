@@ -41,3 +41,11 @@
 "tabContext.forkConversation.newWorkspace" = "New Workspace";
 "tabContext.disconnectRemote" = "Disconnect SSH";
 "tabContext.remoteConnectedAccessibility" = "Connected over SSH";
+"surfaceCaption.close" = "Close Surface";
+"surfaceCaption.loading" = "Loading";
+"surfaceCaption.pinned" = "Pinned";
+"surfaceCaption.unread" = "Unread";
+"surfaceCaption.modified" = "Modified";
+"surfaceCaption.zoomed" = "Zoomed";
+"surfaceCaption.action.focusPane" = "Focus Pane";
+"surfaceCaption.action.toggleZoom" = "Toggle Zoom";

@@ -32,13 +32,67 @@ public enum TabBarVisibility: Sendable, Equatable {
     /// Show the pane tab bar only when there are multiple tabs to switch between.
     case multipleTabs
 
-    public func showsTabBar(tabCount: Int) -> Bool {
+    /// Keep the pane header mounted, present one tab as a caption, and show tabs
+    /// only when there are multiple tabs to switch between.
+    case adaptive
+
+    func presentation(
+        tabCount: Int,
+        isFullWidthTabMode: Bool = false
+    ) -> PaneHeaderPresentation {
+        let normalizedTabCount = max(0, tabCount)
+
         switch self {
         case .always:
-            return true
+            return normalizedTabCount == 0 ? .empty : .tabs
         case .multipleTabs:
-            return tabCount >= 2
+            return normalizedTabCount >= 2 ? .tabs : .hidden
+        case .adaptive:
+            if isFullWidthTabMode, normalizedTabCount > 0 {
+                return .tabs
+            }
+            switch normalizedTabCount {
+            case 0:
+                return .empty
+            case 1:
+                return .caption
+            default:
+                return .tabs
+            }
         }
+    }
+
+    public func showsTabBar(tabCount: Int) -> Bool {
+        presentation(tabCount: tabCount) != .hidden
+    }
+}
+
+/// The count-derived presentation used by a pane's existing header lane.
+enum PaneHeaderPresentation: Sendable, Equatable {
+    case hidden
+    case empty
+    case caption
+    case tabs
+
+    /// Whether the header renders at all. `.hidden` drops the whole lane.
+    var rendersHeader: Bool {
+        self != .hidden
+    }
+
+    /// Whether the header's bottom separator is drawn.
+    ///
+    /// Every rendered header has one. It is chrome that marks where the header
+    /// ends, not selection feedback, so caption mode keeps it and `.empty`
+    /// panes — which never opted into captions — keep the one they always had.
+    var showsHeaderSeparator: Bool {
+        rendersHeader
+    }
+
+    /// Whether the selected-tab accent indicator is drawn.
+    ///
+    /// Tab mode only. There is no selected tab to mark in the other states.
+    var showsSelectedTabIndicator: Bool {
+        self == .tabs
     }
 }
 
@@ -625,6 +679,18 @@ extension BonsplitConfiguration {
         /// that would create visibly different translucent layers.
         public var usesSharedBackdrop: Bool
 
+        /// Default background treatment for a one-surface caption.
+        public var surfaceCaptionBackgroundStyle: SurfaceCaptionBackgroundStyle
+
+        /// Host-selected caption background overrides keyed by the host's tab kind.
+        ///
+        /// Bonsplit treats tab kinds as opaque identifiers and never assigns meaning
+        /// to a particular string. The host owns every mapping in this dictionary.
+        public var surfaceCaptionBackgroundStyleOverrides: [String: SurfaceCaptionBackgroundStyle]
+
+        /// Whether a focused caption in a multi-pane layout draws a bottom-edge focus rule.
+        public var showsCaptionPaneFocusIndicator: Bool
+
         // MARK: - Presets
 
         public static let `default` = Appearance()
@@ -667,7 +733,10 @@ extension BonsplitConfiguration {
             animationDuration: Double = 0.15,
             enableAnimations: Bool = true,
             chromeColors: ChromeColors = .init(),
-            usesSharedBackdrop: Bool = false
+            usesSharedBackdrop: Bool = false,
+            surfaceCaptionBackgroundStyle: SurfaceCaptionBackgroundStyle = .tabBar,
+            surfaceCaptionBackgroundStyleOverrides: [String: SurfaceCaptionBackgroundStyle] = [:],
+            showsCaptionPaneFocusIndicator: Bool = false
         ) {
             self.tabBarHeight = tabBarHeight
             self.tabMinWidth = tabMinWidth
@@ -690,6 +759,14 @@ extension BonsplitConfiguration {
             self.enableAnimations = enableAnimations
             self.chromeColors = chromeColors
             self.usesSharedBackdrop = usesSharedBackdrop
+            self.surfaceCaptionBackgroundStyle = surfaceCaptionBackgroundStyle
+            self.surfaceCaptionBackgroundStyleOverrides = surfaceCaptionBackgroundStyleOverrides
+            self.showsCaptionPaneFocusIndicator = showsCaptionPaneFocusIndicator
+        }
+
+        func surfaceCaptionBackgroundStyle(forTabKind kind: String?) -> SurfaceCaptionBackgroundStyle {
+            guard let kind else { return surfaceCaptionBackgroundStyle }
+            return surfaceCaptionBackgroundStyleOverrides[kind] ?? surfaceCaptionBackgroundStyle
         }
 
         private static func uniqueSplitButtons(_ buttons: [SplitActionButton]) -> [SplitActionButton] {

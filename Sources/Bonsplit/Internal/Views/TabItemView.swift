@@ -24,9 +24,12 @@ extension View {
     /// tabs. Passing `nil` returns the view untouched, preserving the fixed-width layout
     /// byte-for-byte.
     @ViewBuilder
-    func tabRowFillMinWidth(_ minWidth: CGFloat?) -> some View {
+    func tabRowFillMinWidth(
+        _ minWidth: CGFloat?,
+        alignment: Alignment = .leading
+    ) -> some View {
         if let minWidth {
-            frame(minWidth: minWidth, alignment: .leading)
+            frame(minWidth: minWidth, alignment: alignment)
         } else {
             self
         }
@@ -1083,7 +1086,7 @@ struct TabItemView: View {
     }
 }
 
-private struct TabLoadingSpinner: NSViewRepresentable {
+struct TabLoadingSpinner: NSViewRepresentable {
     let size: CGFloat
     let color: NSColor
 
@@ -1249,7 +1252,7 @@ final class TabLoadingSpinnerLayerView: NSView {
     }
 }
 
-private struct FaviconIconView: NSViewRepresentable {
+struct FaviconIconView: NSViewRepresentable {
     let image: NSImage
 
     final class ContainerView: NSView {
@@ -1295,7 +1298,7 @@ private struct FaviconIconView: NSViewRepresentable {
     }
 }
 
-private struct MiddleClickMonitorView: NSViewRepresentable {
+struct MiddleClickMonitorView: NSViewRepresentable {
     let onMiddleClick: () -> Void
 
     final class Coordinator {

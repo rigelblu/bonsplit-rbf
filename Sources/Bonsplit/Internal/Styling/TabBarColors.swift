@@ -93,17 +93,16 @@ enum TabBarColors {
         for appearance: BonsplitConfiguration.Appearance,
         secondary: Bool
     ) -> NSColor {
-        guard let custom = semanticTabBarBackgroundColor(for: appearance) else {
+        guard hasConfiguredChrome(for: appearance) else {
             return secondary ? .secondaryLabelColor : .labelColor
         }
 
-        if custom.isBonsplitLightColor {
-            let alpha = secondary ? Constants.darkSecondaryTextAlpha : Constants.darkTextAlpha
-            return NSColor.black.withAlphaComponent(alpha)
-        }
-
-        let alpha = secondary ? Constants.lightSecondaryTextAlpha : Constants.lightTextAlpha
-        return NSColor.white.withAlphaComponent(alpha)
+        // Same reference as the caption resolvers above, so tab mode and
+        // caption mode cannot pick opposite text colors for one backdrop.
+        let custom = nsColorResolvedBarBackground(for: appearance)
+        return secondary
+            ? nsColorSecondaryText(over: custom)
+            : nsColorPrimaryText(over: custom)
     }
 
     static func paneBackground(for appearance: BonsplitConfiguration.Appearance) -> Color {
@@ -129,8 +128,88 @@ enum TabBarColors {
             ?? effectiveBackgroundColor(for: appearance, fallback: .windowBackgroundColor)
     }
 
+    static func nsColorResolvedBarBackground(
+        for appearance: BonsplitConfiguration.Appearance
+    ) -> NSColor {
+        // Only the tab-bar hex can be the host's "no fill" sentinel, whose RGB
+        // carries no meaning, so it alone is tested for transparency. The
+        // chrome hex behind it is the real backdrop at any alpha.
+        contrastReference(
+            nonClearColor(tabBarBackgroundColor(for: appearance))
+                ?? chromeBackgroundColor(for: appearance)
+        )
+    }
+
+    static func nsColorResolvedChromeBackground(
+        for appearance: BonsplitConfiguration.Appearance
+    ) -> NSColor {
+        contrastReference(chromeBackgroundColor(for: appearance))
+    }
+
     static func nsColorChromeBackground(for appearance: BonsplitConfiguration.Appearance) -> NSColor {
         effectiveBackgroundColor(for: appearance, fallback: .windowBackgroundColor)
+    }
+
+    static func nsColorPrimaryText(over background: NSColor) -> NSColor {
+        if background.isBonsplitLightColor {
+            return NSColor.black.withAlphaComponent(Constants.darkTextAlpha)
+        }
+        return NSColor.white.withAlphaComponent(Constants.lightTextAlpha)
+    }
+
+    static func nsColorSecondaryText(over background: NSColor) -> NSColor {
+        if background.isBonsplitLightColor {
+            return NSColor.black.withAlphaComponent(Constants.darkSecondaryTextAlpha)
+        }
+        return NSColor.white.withAlphaComponent(Constants.lightSecondaryTextAlpha)
+    }
+
+    static func nsColorHoverBackground(over background: NSColor) -> NSColor {
+        if background.isBonsplitLightColor {
+            return NSColor.black.withAlphaComponent(0.08)
+        }
+        return NSColor.white.withAlphaComponent(0.12)
+    }
+
+    /// The color pane-header content is judged against when picking text and
+    /// focus-rule colors.
+    ///
+    /// The header sits over the terminal backdrop, so it makes the same call
+    /// the terminal makes for its own text: keep the RGB, ignore the alpha.
+    /// Ghostty's `contrasted_color` takes `bg.rgb` and never reads `bg.a`, and
+    /// its `bg_color` uniform only ever has index 3 rewritten — for
+    /// `background-opacity`, glass styles, and host-owned backdrops alike.
+    ///
+    /// Compositing over `windowBackgroundColor` instead would guess at pixels
+    /// the header cannot see. Under `.transparentOverChrome` the header's own
+    /// surface is clear, so what is actually behind it is the window-root
+    /// backdrop, not an AppKit system color. Guessing also moves the text
+    /// color every time `background-opacity` changes, and inverts it once a
+    /// second surface switches the pane from caption to tabs.
+    /// Alpha is dropped, never consulted. A fully transparent hex still carries
+    /// the backdrop's real RGB — `background-opacity = 0` is the case that
+    /// proves it, and Ghostty keeps contrasting against `bg.rgb` there too.
+    /// The fallback fires only when no hex was configured at all.
+    private static func contrastReference(_ color: NSColor?) -> NSColor {
+        guard let color, let resolved = color.usingColorSpace(.sRGB) else {
+            return .windowBackgroundColor
+        }
+        return NSColor(
+            srgbRed: resolved.redComponent,
+            green: resolved.greenComponent,
+            blue: resolved.blueComponent,
+            alpha: 1
+        )
+    }
+
+    /// Whether the host configured any chrome color for this appearance.
+    ///
+    /// Distinct from "is it opaque": a transparent hex is still a configured
+    /// color with usable RGB.
+    private static func hasConfiguredChrome(
+        for appearance: BonsplitConfiguration.Appearance
+    ) -> Bool {
+        tabBarBackgroundColor(for: appearance) != nil
     }
 
     static func nsColorSplitButtonBackdropSurface(for appearance: BonsplitConfiguration.Appearance) -> NSColor {

@@ -169,12 +169,18 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
     }
 
     var body: some View {
+        let headerPresentation = tabBarVisibility.presentation(
+            tabCount: pane.tabs.count,
+            isFullWidthTabMode: pane.isFullWidthTabMode
+        )
+
         VStack(spacing: 0) {
-            if tabBarVisibility.showsTabBar(tabCount: pane.tabs.count) {
+            if headerPresentation.rendersHeader {
                 TabBarView(
                     pane: pane,
                     isFocused: isFocused,
-                    showSplitButtons: showSplitButtons
+                    showSplitButtons: showSplitButtons,
+                    presentation: headerPresentation
                 )
             }
 

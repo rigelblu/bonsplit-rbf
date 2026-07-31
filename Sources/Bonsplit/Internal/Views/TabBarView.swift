@@ -794,10 +794,12 @@ struct TabContextMenuState {
 struct TabBarView: View {
     @Environment(BonsplitController.self) private var controller
     @Environment(SplitViewController.self) private var splitViewController
+    @Environment(\.controlActiveState) private var controlActiveState
     
     @Bindable var pane: PaneState
     let isFocused: Bool
     var showSplitButtons: Bool = true
+    var presentation: PaneHeaderPresentation = .tabs
 
     @AppStorage("workspacePresentationMode") private var presentationMode = "standard"
     @AppStorage("debugFadeColorStyle") private var fadeColorStyle = -1
@@ -826,7 +828,7 @@ struct TabBarView: View {
         return scrollOffset < tabsWidth - containerWidth
     }
 
-    /// Whether this tab bar should show full saturation (focused or drag source)
+    /// Whether this tab bar should show full saturation (focused or drag source).
     private var shouldShowFullSaturation: Bool {
         isFocused || splitViewController.dragSourcePaneId == pane.id
     }
@@ -856,6 +858,23 @@ struct TabBarView: View {
     private var fillRowMinWidth: CGFloat? {
         guard fillsTabsToWidth, containerWidth > 0 else { return nil }
         return containerWidth
+    }
+
+    private var tabRowMinWidth: CGFloat? {
+        guard presentation == .caption else { return fillRowMinWidth }
+        return containerWidth > 0 ? containerWidth : nil
+    }
+
+    private var tabRowHorizontalPadding: CGFloat {
+        presentation == .caption ? 0 : TabBarMetrics.barPadding
+    }
+
+    private var tabRowTrailingPadding: CGFloat {
+        presentation == .caption ? 0 : trailingTabContentInset
+    }
+
+    private var tabRowAlignment: Alignment {
+        presentation == .caption ? .center : .leading
     }
 
     private var tabBarHeight: CGFloat {
@@ -956,6 +975,30 @@ struct TabBarView: View {
         )
     }
 
+    private var paneFocusChrome: TabBarPaneFocusChrome {
+        TabBarPaneFocusChrome(
+            isEnabled: appearance.showsCaptionPaneFocusIndicator,
+            presentation: presentation,
+            isFocused: isFocused,
+            paneCount: splitViewController.rootNode.allPaneIds.count,
+            surfaceCount: pane.tabs.count,
+            isWindowKey: controlActiveState == .key,
+            isAnyPaneZoomed: splitViewController.zoomedPaneId != nil,
+            resolvedBackgroundColor: surfaceCaptionChrome.resolvedBackgroundColor
+        )
+    }
+
+    @ViewBuilder
+    private var paneFocusRule: some View {
+        if presentation == .caption, let color = paneFocusChrome.color {
+            Rectangle()
+                .fill(Color(nsColor: color))
+                .frame(height: TabBarPaneFocusChrome.lineWidth)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+    }
+
     private var visibleTabEntries: [(index: Int, tab: TabItem)] {
         if isFullWidthTabMode {
             let selectedTab = pane.selectedTab ?? pane.tabs.first
@@ -976,14 +1019,26 @@ struct TabBarView: View {
 
     @ViewBuilder
     private var selectionChrome: some View {
-        TabBarSelectionChromeView(
-            selectedTabId: pane.selectedTabId,
-            geometryRegistry: tabItemGeometryRegistry,
-            indicatorColor: TabBarColors.nsColorActiveIndicator(saturation: tabBarSaturation),
-            separatorColor: TabBarColors.nsColorSeparator(for: appearance),
-            mask: selectionChromeMask
-        )
-        .allowsHitTesting(false)
+        // This view carries two marks on opposite edges: the header's bottom
+        // separator and the selected-tab indicator at the top. Only the
+        // indicator belongs to tab mode. The separator is header chrome that
+        // `.caption` keeps by design, and that `.empty` — embedded panes which
+        // never opted into captions — has always had.
+        //
+        // Withholding the selection draws the separator full width and skips
+        // the indicator, so neither mark needs its own gate.
+        if presentation.showsHeaderSeparator {
+            TabBarSelectionChromeView(
+                selectedTabId: presentation.showsSelectedTabIndicator
+                    ? pane.selectedTabId
+                    : nil,
+                geometryRegistry: tabItemGeometryRegistry,
+                indicatorColor: TabBarColors.nsColorActiveIndicator(saturation: tabBarSaturation),
+                separatorColor: TabBarColors.nsColorSeparator(for: appearance),
+                mask: selectionChromeMask
+            )
+            .allowsHitTesting(false)
+        }
     }
 
     @ViewBuilder
@@ -992,7 +1047,8 @@ struct TabBarView: View {
             hitRegion: .registeredTrailingEmptyChrome(
                 geometryRegistry: tabItemGeometryRegistry,
                 tabIds: tabIds,
-                reservedTrailingWidth: shouldRenderSplitButtons ? splitButtonsBackdropWidth : 0
+                reservedTrailingWidth: shouldRenderSplitButtons ? splitButtonsBackdropWidth : 0,
+                includesLeadingSpace: presentation == .caption
             ),
             isMinimalMode: isMinimalMode,
             isFocusedPane: isFocused,
@@ -1053,19 +1109,30 @@ struct TabBarView: View {
     @ViewBuilder
     private var tabScrollContent: some View {
         HStack(spacing: TabBarMetrics.tabSpacing) {
-            ForEach(visibleTabEntries, id: \.tab.id) { entry in
-                tabItem(for: entry.tab, at: entry.index)
-                    .id(entry.tab.id)
+            if presentation == .caption, let tab = pane.tabs.first {
+                captionItem(for: tab)
+                    .id(tab.id)
+            } else {
+                ForEach(visibleTabEntries, id: \.tab.id) { entry in
+                    tabItem(for: entry.tab, at: entry.index)
+                        .id(entry.tab.id)
+                }
             }
 
-            if !isFullWidthTabMode {
+            if presentation != .caption && !isFullWidthTabMode {
                 // Unified drop zone after the last tab.
                 dropZoneAfterTabs
             }
         }
-        .padding(.horizontal, TabBarMetrics.barPadding)
-        .padding(.trailing, trailingTabContentInset)
-        .tabRowFillMinWidth(fillRowMinWidth)
+        .padding(.horizontal, tabRowHorizontalPadding)
+        .padding(.trailing, tabRowTrailingPadding)
+        .tabRowFillMinWidth(tabRowMinWidth, alignment: tabRowAlignment)
+        // Centering needs a measured container width, and `tabRowMinWidth` is
+        // nil until `GeometryReader` reports one. Without this the caption
+        // renders flush-left for a frame and then jumps to centre on pane
+        // creation and at the 2→1 transition. Hiding rather than moving keeps
+        // the layout still.
+        .opacity(presentation == .caption && containerWidth <= 0 ? 0 : 1)
         .frame(height: tabBarHeight, alignment: .top)
         .animation(nil, value: pane.tabs.map(\.id))
         .background(
@@ -1167,6 +1234,9 @@ struct TabBarView: View {
                 }
                 .clipped()
         }
+        .overlay(alignment: .bottom) {
+            paneFocusRule
+        }
         .background(dragAndHoverBackground)
         .overlay(
             TabBarHoverTrackingView { updateTabBarHover($0) }
@@ -1219,6 +1289,93 @@ struct TabBarView: View {
     private func updateTabBarHover(_ hovering: Bool) {
         withTransaction(Transaction(animation: nil)) {
             isHoveringTabBar = hovering
+        }
+    }
+
+    @ViewBuilder
+    private func captionItem(for tab: TabItem) -> some View {
+        let contextMenuState = contextMenuState(for: tab, at: 0)
+        let showsZoomIndicator = splitViewController.zoomedPaneId == pane.id
+            && pane.selectedTabId == tab.id
+
+        SurfaceCaptionView(
+            tab: tab,
+            showsZoomIndicator: showsZoomIndicator,
+            appearance: appearance,
+            chrome: surfaceCaptionChrome,
+            saturation: tabBarSaturation,
+            allowsClose: controller.configuration.allowCloseTabs,
+            allowsContextMenu: controller.configuration.allowsTabContextMenu,
+            contextMenuState: contextMenuState,
+            moveDestinationsProvider: {
+                controller.tabContextMoveDestinationsProvider?(TabID(id: tab.id), pane.id) ?? []
+            },
+            forkConversationAvailabilityProvider: {
+                controller.tabContextForkConversationAvailabilityProvider?(TabID(id: tab.id), pane.id) ?? .hidden
+            },
+            onFocus: {
+                withTransaction(Transaction(animation: nil)) {
+                    pane.selectTab(tab.id)
+                    controller.focusPane(pane.id)
+                }
+            },
+            onClose: { source in
+                guard !tab.isPinned else { return }
+                withTransaction(Transaction(animation: nil)) {
+                    controller.onTabCloseRequest?(TabID(id: tab.id), pane.id, source)
+                    _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
+                }
+            },
+            onZoomToggle: {
+                _ = controller.requestTabZoomToggle(for: TabID(id: tab.id), inPane: pane.id)
+            },
+            onContextAction: { action in
+                controller.requestTabContextAction(action, for: TabID(id: tab.id), inPane: pane.id)
+            },
+            onMoveDestination: { destinationId in
+                controller.requestTabMove(
+                    toDestination: destinationId,
+                    for: TabID(id: tab.id),
+                    inPane: pane.id
+                )
+            }
+        )
+        .background(
+            TabItemHitRegionView(
+                tabId: tab.id,
+                geometryRegistry: tabItemGeometryRegistry
+            )
+        )
+        .onDrag {
+            createItemProvider(for: tab)
+        } preview: {
+            TabDragPreview(tab: tab, appearance: appearance)
+        }
+        .onDrop(of: [.tabTransfer, .fileURL], delegate: TabDropDelegate(
+            targetIndex: 0,
+            pane: pane,
+            bonsplitController: controller,
+            controller: splitViewController,
+            dropTargetIndex: $dropTargetIndex,
+            dropLifecycle: $dropLifecycle
+        ))
+        .overlay(alignment: .leading) {
+            if dropTargetIndex == 0 {
+                dropIndicator
+                    .accessibilityIdentifier("paneTabBar.dropIndicator")
+                    .saturation(tabBarSaturation)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            // Caption mode drops `dropZoneAfterTabs`, which owned the
+            // after-the-last-tab indicator, but the trailing empty chrome still
+            // accepts a drop at `pane.tabs.count`. Without this the drop is
+            // taken with no mark showing where it lands.
+            if dropTargetIndex == pane.tabs.count {
+                dropIndicator
+                    .accessibilityIdentifier("paneTabBar.dropIndicator")
+                    .saturation(tabBarSaturation)
+            }
         }
     }
 
@@ -1740,9 +1897,23 @@ struct TabBarView: View {
 
     @ViewBuilder
     private var tabBarSurface: some View {
-        TabBarLayerBackedColor(color: chromeSnapshot.barColor)
+        TabBarLayerBackedColor(color: tabBarSurfaceColor)
             .frame(maxWidth: .infinity)
             .frame(height: tabBarHeight)
+    }
+
+    private var tabBarSurfaceColor: NSColor {
+        guard presentation == .caption else {
+            return chromeSnapshot.barColor
+        }
+        return surfaceCaptionChrome.surfaceColor
+    }
+
+    private var surfaceCaptionChrome: SurfaceCaptionChrome {
+        let style = appearance.surfaceCaptionBackgroundStyle(
+            forTabKind: pane.tabs.first?.kind
+        )
+        return SurfaceCaptionChrome(style: style, appearance: appearance)
     }
 
 }
@@ -2485,7 +2656,12 @@ struct TabBarDragZoneView: NSViewRepresentable {
         case registeredTrailingEmptyChrome(
             geometryRegistry: TabBarItemGeometryRegistry,
             tabIds: [UUID],
-            reservedTrailingWidth: CGFloat
+            reservedTrailingWidth: CGFloat,
+            // Tabs pack from the leading edge, so empty chrome is only ever to
+            // their trailing side. A centered caption breaks that assumption
+            // and puts empty chrome on both sides, where the leading half would
+            // otherwise be click-dead.
+            includesLeadingSpace: Bool
         )
     }
 
@@ -2656,34 +2832,42 @@ struct TabBarDragZoneView: NSViewRepresentable {
                 return true
             case .trailingEmptyChrome(let tabFrames, let reservedTrailingWidth):
                 guard isMouseDownOrDragCandidate else { return false }
-                return shouldCaptureTrailingEmptyChrome(
+                return shouldCaptureEmptyChrome(
                     at: point,
                     tabFrames: tabFrames,
-                    reservedTrailingWidth: reservedTrailingWidth
+                    reservedTrailingWidth: reservedTrailingWidth,
+                    includesLeadingSpace: false
                 )
-            case .registeredTrailingEmptyChrome(let geometryRegistry, let tabIds, let reservedTrailingWidth):
+            case .registeredTrailingEmptyChrome(
+                let geometryRegistry,
+                let tabIds,
+                let reservedTrailingWidth,
+                let includesLeadingSpace
+            ):
                 guard isMouseDownOrDragCandidate else { return false }
-                return shouldCaptureTrailingEmptyChrome(
+                return shouldCaptureEmptyChrome(
                     at: point,
                     tabFrames: geometryRegistry.frames(for: tabIds, in: self).values.map { $0 },
-                    reservedTrailingWidth: reservedTrailingWidth
+                    reservedTrailingWidth: reservedTrailingWidth,
+                    includesLeadingSpace: includesLeadingSpace
                 )
             }
         }
 
-        private func shouldCaptureTrailingEmptyChrome(
+        private func shouldCaptureEmptyChrome(
             at point: NSPoint,
             tabFrames: [CGRect],
-            reservedTrailingWidth: CGFloat
+            reservedTrailingWidth: CGFloat,
+            includesLeadingSpace: Bool
         ) -> Bool {
-            let trailingLimit = bounds.maxX - max(0, reservedTrailingWidth)
-            guard point.x < trailingLimit else { return false }
-            let paddedFrames = tabFrames.map {
-                $0.insetBy(dx: -BonsplitTabItemHitTesting.horizontalSlop, dy: -2)
-            }
-            guard !paddedFrames.contains(where: { $0.contains(point) }) else { return false }
-            let startX = paddedFrames.map(\.maxX).max() ?? bounds.minX
-            return point.x >= startX
+            TabBarEmptyChromeHitRegion.captures(
+                point: point,
+                bounds: bounds,
+                itemFrames: tabFrames,
+                reservedTrailingWidth: reservedTrailingWidth,
+                includesLeadingSpace: includesLeadingSpace,
+                horizontalSlop: BonsplitTabItemHitTesting.horizontalSlop
+            )
         }
 
         func windowDragCursorRectsForCurrentState() -> [NSRect] {
@@ -2693,39 +2877,37 @@ struct TabBarDragZoneView: NSViewRepresentable {
             case .entireBounds:
                 return [bounds]
             case .trailingEmptyChrome(let tabFrames, let reservedTrailingWidth):
-                return trailingEmptyChromeCursorRects(
+                return emptyChromeCursorRects(
                     tabFrames: tabFrames,
-                    reservedTrailingWidth: reservedTrailingWidth
+                    reservedTrailingWidth: reservedTrailingWidth,
+                    includesLeadingSpace: false
                 )
-            case .registeredTrailingEmptyChrome(let geometryRegistry, let tabIds, let reservedTrailingWidth):
-                return trailingEmptyChromeCursorRects(
+            case .registeredTrailingEmptyChrome(
+                let geometryRegistry,
+                let tabIds,
+                let reservedTrailingWidth,
+                let includesLeadingSpace
+            ):
+                return emptyChromeCursorRects(
                     tabFrames: geometryRegistry.frames(for: tabIds, in: self).values.map { $0 },
-                    reservedTrailingWidth: reservedTrailingWidth
+                    reservedTrailingWidth: reservedTrailingWidth,
+                    includesLeadingSpace: includesLeadingSpace
                 )
             }
         }
 
-        private func trailingEmptyChromeCursorRects(
+        private func emptyChromeCursorRects(
             tabFrames: [CGRect],
-            reservedTrailingWidth: CGFloat
+            reservedTrailingWidth: CGFloat,
+            includesLeadingSpace: Bool
         ) -> [NSRect] {
-            let trailingLimit = bounds.maxX - max(0, reservedTrailingWidth)
-            guard trailingLimit > bounds.minX else { return [] }
-
-            let paddedFrames = tabFrames.map {
-                $0.insetBy(dx: -BonsplitTabItemHitTesting.horizontalSlop, dy: -2)
-            }
-            let startX = max(bounds.minX, paddedFrames.map(\.maxX).max() ?? bounds.minX)
-            guard trailingLimit > startX else { return [] }
-
-            return [
-                NSRect(
-                    x: startX,
-                    y: bounds.minY,
-                    width: trailingLimit - startX,
-                    height: bounds.height
-                )
-            ]
+            TabBarEmptyChromeHitRegion.cursorRects(
+                bounds: bounds,
+                itemFrames: tabFrames,
+                reservedTrailingWidth: reservedTrailingWidth,
+                includesLeadingSpace: includesLeadingSpace,
+                horizontalSlop: BonsplitTabItemHitTesting.horizontalSlop
+            )
         }
 
         private func invalidateWindowDragCursorRects() {
@@ -2734,12 +2916,12 @@ struct TabBarDragZoneView: NSViewRepresentable {
         }
 
         private func registerGeometryObserver(from hitRegion: HitRegion) {
-            guard case .registeredTrailingEmptyChrome(let registry, _, _) = hitRegion else { return }
+            guard case .registeredTrailingEmptyChrome(let registry, _, _, _) = hitRegion else { return }
             registry.registerObserver(self)
         }
 
         private func unregisterGeometryObserver(from hitRegion: HitRegion) {
-            guard case .registeredTrailingEmptyChrome(let registry, _, _) = hitRegion else { return }
+            guard case .registeredTrailingEmptyChrome(let registry, _, _, _) = hitRegion else { return }
             registry.unregisterObserver(self)
         }
 
